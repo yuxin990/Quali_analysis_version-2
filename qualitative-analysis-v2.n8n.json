@@ -1,0 +1,758 @@
+{
+  "name": "Qualitative Thematic Analysis V2 - Academic Domain",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID_HERE",
+          "mode": "id"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "node-001",
+      "name": "Google Drive Trigger",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [180, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "anthropic_api_key",
+              "value": "YOUR_ANTHROPIC_API_KEY_HERE",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "model",
+              "value": "claude-sonnet-4-6",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "research_question",
+              "value": "What are the key themes in the data?",
+              "type": "string"
+            },
+            {
+              "id": "field-004",
+              "name": "analysis_method",
+              "value": "Braun & Clarke (2006) Thematic Analysis",
+              "type": "string"
+            },
+            {
+              "id": "field-005",
+              "name": "domain",
+              "value": "politics, international studies, geopolitics, AI governance, technology studies",
+              "type": "string"
+            },
+            {
+              "id": "field-006",
+              "name": "chunk_size_words",
+              "value": 300,
+              "type": "number"
+            },
+            {
+              "id": "field-007",
+              "name": "enable_ai_coding",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-002",
+      "name": "Set: Research Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Google Drive Trigger').item.json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "node-003",
+      "name": "Google Drive: Download File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [620, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-001",
+              "leftValue": "={{ $('Google Drive Trigger').item.json.mimeType }}",
+              "rightValue": "application/pdf",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-004",
+      "name": "IF: Is PDF?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst triggerData = $('Google Drive Trigger').item.json;\nconst config = $('Set: Research Config').item.json;\n\nif (config.anthropic_api_key.startsWith('YOUR_')) {\n  throw new Error('Set your Anthropic API key in Set: Research Config node.');\n}\n\nconst binaryData = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst base64String = binaryData.toString('base64');\n\nif (!base64String || base64String.length < 100) {\n  throw new Error('PDF binary data is empty or unreadable.');\n}\n\nreturn [{\n  json: {\n    claude_request: {\n      model: config.model,\n      max_tokens: 8096,\n      temperature: 0,\n      messages: [{\n        role: 'user',\n        content: [\n          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64String } },\n          { type: 'text', text: 'Extract all text from this PDF. Return only raw text preserving paragraph breaks. No commentary, no analysis.' }\n        ]\n      }]\n    },\n    filename: triggerData.name,\n    anthropic_api_key: config.anthropic_api_key,\n    research_question: config.research_question,\n    analysis_method: config.analysis_method,\n    domain: config.domain,\n    chunk_size_words: config.chunk_size_words,\n    enable_ai_coding: config.enable_ai_coding,\n    model: config.model\n  }\n}];"
+      },
+      "id": "node-005",
+      "name": "Code: Prepare PDF Extraction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.claude_request }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-006",
+      "name": "HTTP: Extract PDF Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1280, 160],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst prepNode = $('Code: Prepare PDF Extraction').item.json;\n\nif (!apiResponse.content || !apiResponse.content[0] || !apiResponse.content[0].text) {\n  throw new Error('PDF extraction failed: ' + JSON.stringify(apiResponse).substring(0, 200));\n}\n\nconst extractedText = apiResponse.content[0].text.trim();\n\nif (extractedText.length < 50) {\n  throw new Error('Very little text extracted. PDF may be image-based. Convert to text-based PDF.');\n}\n\nreturn [{\n  json: {\n    extracted_text: extractedText,\n    filename: prepNode.filename,\n    extraction_method: 'claude_pdf',\n    char_count: extractedText.length,\n    research_question: prepNode.research_question,\n    analysis_method: prepNode.analysis_method,\n    domain: prepNode.domain,\n    chunk_size_words: prepNode.chunk_size_words,\n    enable_ai_coding: prepNode.enable_ai_coding,\n    model: prepNode.model,\n    anthropic_api_key: prepNode.anthropic_api_key\n  }\n}];"
+      },
+      "id": "node-007",
+      "name": "Code: Parse PDF Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 160]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "id": "node-008",
+      "name": "Extract from File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [1060, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst triggerData = $('Google Drive Trigger').item.json;\nconst config = $('Set: Research Config').item.json;\n\nconst rawText = (item.text || item.data || '').trim();\n\nif (!rawText || rawText.length < 50) {\n  throw new Error('Insufficient text from Word document. Convert to PDF for best results.');\n}\n\nreturn [{\n  json: {\n    extracted_text: rawText,\n    filename: triggerData.name,\n    extraction_method: 'n8n_extract',\n    char_count: rawText.length,\n    research_question: config.research_question,\n    analysis_method: config.analysis_method,\n    domain: config.domain,\n    chunk_size_words: config.chunk_size_words,\n    enable_ai_coding: config.enable_ai_coding,\n    model: config.model,\n    anthropic_api_key: config.anthropic_api_key\n  }\n}];"
+      },
+      "id": "node-009",
+      "name": "Code: Add DOCX Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1280, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nif (!data.extracted_text || data.extracted_text.trim().length === 0) {\n  throw new Error('No text available for analysis.');\n}\n\nconst text = data.extracted_text\n  .replace(/\\r\\n/g, '\\n')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .replace(/[ \\t]{2,}/g, ' ')\n  .trim();\n\nconst chunkSizeWords = parseInt(data.chunk_size_words) || 300;\nconst overlap = 40;\nconst words = text.split(/\\s+/).filter(w => w.length > 0);\nconst chunks = [];\n\nfor (let i = 0; i < words.length; i += (chunkSizeWords - overlap)) {\n  const end = Math.min(i + chunkSizeWords, words.length);\n  chunks.push(words.slice(i, end).join(' '));\n  if (end >= words.length) break;\n}\n\nreturn chunks.map((chunk, idx) => ({\n  json: {\n    chunk_text: chunk,\n    chunk_index: idx,\n    total_chunks: chunks.length,\n    word_count: chunk.split(/\\s+/).length,\n    source_name: data.filename,\n    research_question: data.research_question,\n    analysis_method: data.analysis_method,\n    domain: data.domain,\n    model: data.model,\n    anthropic_api_key: data.anthropic_api_key,\n    enable_ai_coding: data.enable_ai_coding,\n    started_at: new Date().toISOString()\n  }\n}));"
+      },
+      "id": "node-010",
+      "name": "Code: Clean & Chunk Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nconst systemPrompt = [\n  'You are an academic expert in qualitative thematic analysis specialising in: ' + item.domain + '.',\n  'You apply rigorous qualitative research methods following ' + item.analysis_method + '.',\n  'Your task is to perform open coding on the provided text chunk.',\n  '',\n  'RULES:',\n  '- Generate granular, descriptive codes that capture the essence of the text.',\n  '- Each code must include an exact verbatim quotation from the text.',\n  '- Do not fabricate or paraphrase quotations — use only text that appears word-for-word in the chunk.',\n  '- Code names must be in snake_case (e.g. power_dynamics, institutional_legitimacy).',\n  '- Focus codes on themes relevant to: ' + item.research_question,\n  '- Produce between 3 and 10 codes per chunk depending on richness of content.',\n  '',\n  'Return ONLY valid JSON matching this schema, with no additional commentary:',\n  '{',\n  '  \"document_name\": \"<filename>\",',\n  '  \"codes\": [',\n  '    {',\n  '      \"code\": \"<snake_case_code_name>\",',\n  '      \"definition\": \"<one sentence definition of what this code captures>\",',\n  '      \"quotation\": \"<exact verbatim quote from the text>\",',\n  '      \"reasoning\": \"<why this quotation exemplifies this code>\"',\n  '    }',\n  '  ]',\n  '}'\n].join('\\n');\n\nconst userPrompt = [\n  'Document: ' + item.source_name,\n  'Chunk ' + (item.chunk_index + 1) + ' of ' + item.total_chunks + ':',\n  '',\n  item.chunk_text\n].join('\\n');\n\nreturn [{\n  json: {\n    claude_request: {\n      model: item.model,\n      max_tokens: 3000,\n      temperature: 0,\n      system: systemPrompt,\n      messages: [{\n        role: 'user',\n        content: userPrompt\n      }]\n    },\n    chunk_index: item.chunk_index,\n    total_chunks: item.total_chunks,\n    source_name: item.source_name,\n    research_question: item.research_question,\n    analysis_method: item.analysis_method,\n    domain: item.domain,\n    model: item.model,\n    anthropic_api_key: item.anthropic_api_key,\n    enable_ai_coding: item.enable_ai_coding,\n    started_at: item.started_at\n  }\n}];"
+      },
+      "id": "node-011",
+      "name": "Code: Build Step1 Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1940, 300]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "unit": "seconds",
+        "amount": 30,
+        "options": {}
+      },
+      "id": "node-012",
+      "name": "Wait: Rate Limit Buffer",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [2160, 300],
+      "webhookId": "wait-rate-limit-buffer"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.claude_request }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-013",
+      "name": "HTTP: Step1 Code Generation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2380, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst meta = $('Code: Build Step1 Request').item.json;\n\nif (!apiResponse.content || !apiResponse.content[0] || !apiResponse.content[0].text) {\n  return [{\n    json: {\n      codes: [],\n      chunk_index: meta.chunk_index,\n      total_chunks: meta.total_chunks,\n      source_name: meta.source_name,\n      research_question: meta.research_question,\n      analysis_method: meta.analysis_method,\n      domain: meta.domain,\n      model: meta.model,\n      anthropic_api_key: meta.anthropic_api_key,\n      enable_ai_coding: meta.enable_ai_coding,\n      started_at: meta.started_at,\n      parse_error: 'No content in API response: ' + JSON.stringify(apiResponse).substring(0, 200)\n    }\n  }];\n}\n\nlet rawText = apiResponse.content[0].text.trim();\n\n// Strip markdown code fences if present\nrawText = rawText.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawText);\n} catch (e) {\n  // Attempt to extract JSON object from surrounding text\n  const match = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try {\n      parsed = JSON.parse(match[0]);\n    } catch (e2) {\n      return [{\n        json: {\n          codes: [],\n          chunk_index: meta.chunk_index,\n          total_chunks: meta.total_chunks,\n          source_name: meta.source_name,\n          research_question: meta.research_question,\n          analysis_method: meta.analysis_method,\n          domain: meta.domain,\n          model: meta.model,\n          anthropic_api_key: meta.anthropic_api_key,\n          enable_ai_coding: meta.enable_ai_coding,\n          started_at: meta.started_at,\n          parse_error: 'JSON parse failed: ' + e2.message\n        }\n      }];\n    }\n  } else {\n    return [{\n      json: {\n        codes: [],\n        chunk_index: meta.chunk_index,\n        total_chunks: meta.total_chunks,\n        source_name: meta.source_name,\n        research_question: meta.research_question,\n        analysis_method: meta.analysis_method,\n        domain: meta.domain,\n        model: meta.model,\n        anthropic_api_key: meta.anthropic_api_key,\n        enable_ai_coding: meta.enable_ai_coding,\n        started_at: meta.started_at,\n        parse_error: 'No JSON found in response: ' + e.message\n      }\n    }];\n  }\n}\n\nconst rawCodes = (parsed.codes || []);\nconst validCodes = rawCodes.filter(c => c && c.code && c.quotation);\n\nreturn [{\n  json: {\n    codes: validCodes,\n    chunk_index: meta.chunk_index,\n    total_chunks: meta.total_chunks,\n    source_name: meta.source_name,\n    research_question: meta.research_question,\n    analysis_method: meta.analysis_method,\n    domain: meta.domain,\n    model: meta.model,\n    anthropic_api_key: meta.anthropic_api_key,\n    enable_ai_coding: meta.enable_ai_coding,\n    started_at: meta.started_at,\n    tokens_used: (apiResponse.usage || {}).input_tokens || 0 + (apiResponse.usage || {}).output_tokens || 0\n  }\n}];"
+      },
+      "id": "node-014",
+      "name": "Code: Parse Step1 Codes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2600, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\nif (!allItems || allItems.length === 0) {\n  throw new Error('No chunk results to aggregate.');\n}\n\nconst meta = allItems[0].json;\nlet allCodes = [];\nlet totalTokens = 0;\nconst errors = [];\n\nfor (const item of allItems) {\n  const d = item.json;\n  if (d.parse_error) {\n    errors.push('Chunk ' + d.chunk_index + ': ' + d.parse_error);\n  }\n  if (Array.isArray(d.codes)) {\n    allCodes = allCodes.concat(d.codes);\n  }\n  totalTokens += (d.tokens_used || 0);\n}\n\nreturn [{\n  json: {\n    all_codes: allCodes,\n    total_codes: allCodes.length,\n    total_chunks_processed: allItems.length,\n    total_tokens_step1: totalTokens,\n    source_name: meta.source_name,\n    research_question: meta.research_question,\n    analysis_method: meta.analysis_method,\n    domain: meta.domain,\n    model: meta.model,\n    anthropic_api_key: meta.anthropic_api_key,\n    enable_ai_coding: meta.enable_ai_coding,\n    started_at: meta.started_at,\n    step1_completed_at: new Date().toISOString(),\n    step1_errors: errors\n  }\n}];"
+      },
+      "id": "node-015",
+      "name": "Code: Collect All Step1 Codes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2820, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nconst codesJson = JSON.stringify(item.all_codes, null, 2);\n\nconst systemPrompt = [\n  'You are an academic expert in qualitative thematic analysis specialising in: ' + item.domain + '.',\n  'You apply rigorous qualitative research methods following ' + item.analysis_method + '.',\n  'Your task is to cluster the provided open codes into coherent, higher-order themes.',\n  '',\n  'RULES:',\n  '- Identify between 3 and 7 distinct themes that address the research question.',\n  '- Each theme must be grounded in the codes and their verbatim quotations.',\n  '- Preserve exact quotations — do not paraphrase.',\n  '- Themes must directly address: ' + item.research_question,\n  '- Provide a frequency count of how many codes map to each theme.',\n  '- Write an overall_finding that synthesises the key insight across all themes.',\n  '- Write an analytical_memo reflecting on patterns, tensions, and implications.',\n  '',\n  'Return ONLY valid JSON matching this schema, with no additional commentary:',\n  '{',\n  '  \"document_name\": \"<filename>\",',\n  '  \"clusters\": [',\n  '    {',\n  '      \"theme\": \"<descriptive theme name>\",',\n  '      \"description\": \"<2-3 sentence academic description of the theme>\",',\n  '      \"codes\": [\"<code_name_1>\", \"<code_name_2>\"],',\n  '      \"supporting_quotes\": [\"<exact verbatim quote 1>\", \"<exact verbatim quote 2>\"],',\n  '      \"importance_reasoning\": \"<why this theme matters for the research question>\",',\n  '      \"frequency\": 0',\n  '    }',\n  '  ],',\n  '  \"overall_finding\": \"<synthesised key finding across all themes>\",',\n  '  \"analytical_memo\": \"<reflective memo on patterns, tensions, and implications>\"',\n  '}'\n].join('\\n');\n\nconst userPrompt = [\n  'Document: ' + item.source_name,\n  'Research Question: ' + item.research_question,\n  'Total codes to cluster: ' + item.total_codes,\n  '',\n  'OPEN CODES:',\n  codesJson\n].join('\\n');\n\nreturn [{\n  json: {\n    claude_request: {\n      model: item.model,\n      max_tokens: 4096,\n      temperature: 0,\n      system: systemPrompt,\n      messages: [{\n        role: 'user',\n        content: userPrompt\n      }]\n    },\n    all_codes: item.all_codes,\n    total_codes: item.total_codes,\n    source_name: item.source_name,\n    research_question: item.research_question,\n    analysis_method: item.analysis_method,\n    domain: item.domain,\n    model: item.model,\n    anthropic_api_key: item.anthropic_api_key,\n    enable_ai_coding: item.enable_ai_coding,\n    started_at: item.started_at,\n    step1_completed_at: item.step1_completed_at,\n    total_tokens_step1: item.total_tokens_step1,\n    step1_errors: item.step1_errors\n  }\n}];"
+      },
+      "id": "node-016",
+      "name": "Code: Build Step2 Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3040, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.claude_request }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-017",
+      "name": "HTTP: Step2 Code Clustering",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3260, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst meta = $('Code: Build Step2 Request').item.json;\n\nif (!apiResponse.content || !apiResponse.content[0] || !apiResponse.content[0].text) {\n  throw new Error('Step 2 clustering failed: ' + JSON.stringify(apiResponse).substring(0, 200));\n}\n\nlet rawText = apiResponse.content[0].text.trim();\nrawText = rawText.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawText);\n} catch (e) {\n  const match = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try {\n      parsed = JSON.parse(match[0]);\n    } catch (e2) {\n      throw new Error('Step 2 JSON parse failed: ' + e2.message + ' | Raw: ' + rawText.substring(0, 300));\n    }\n  } else {\n    throw new Error('Step 2 no JSON found: ' + e.message);\n  }\n}\n\nconst clusters = parsed.clusters || [];\nconst overallFinding = parsed.overall_finding || '';\nconst analyticalMemo = parsed.analytical_memo || '';\nconst tokensUsed = ((apiResponse.usage || {}).input_tokens || 0) + ((apiResponse.usage || {}).output_tokens || 0);\n\nreturn [{\n  json: {\n    clusters: clusters,\n    total_themes: clusters.length,\n    overall_finding: overallFinding,\n    analytical_memo: analyticalMemo,\n    all_codes: meta.all_codes,\n    total_codes: meta.total_codes,\n    source_name: meta.source_name,\n    research_question: meta.research_question,\n    analysis_method: meta.analysis_method,\n    domain: meta.domain,\n    model: meta.model,\n    anthropic_api_key: meta.anthropic_api_key,\n    enable_ai_coding: meta.enable_ai_coding,\n    started_at: meta.started_at,\n    step1_completed_at: meta.step1_completed_at,\n    step2_completed_at: new Date().toISOString(),\n    total_tokens_step1: meta.total_tokens_step1,\n    total_tokens_step2: tokensUsed,\n    step1_errors: meta.step1_errors\n  }\n}];"
+      },
+      "id": "node-018",
+      "name": "Code: Parse Step2 Clusters",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nif (!item.enable_ai_coding) {\n  // Pass through with empty AI codes so the pipeline continues\n  return [{\n    json: {\n      claude_request: null,\n      ai_coding_skipped: true,\n      clusters: item.clusters,\n      total_themes: item.total_themes,\n      overall_finding: item.overall_finding,\n      analytical_memo: item.analytical_memo,\n      all_codes: item.all_codes,\n      total_codes: item.total_codes,\n      source_name: item.source_name,\n      research_question: item.research_question,\n      analysis_method: item.analysis_method,\n      domain: item.domain,\n      model: item.model,\n      anthropic_api_key: item.anthropic_api_key,\n      enable_ai_coding: item.enable_ai_coding,\n      started_at: item.started_at,\n      step1_completed_at: item.step1_completed_at,\n      step2_completed_at: item.step2_completed_at,\n      total_tokens_step1: item.total_tokens_step1,\n      total_tokens_step2: item.total_tokens_step2,\n      step1_errors: item.step1_errors\n    }\n  }];\n}\n\nconst codesJson = JSON.stringify(item.all_codes, null, 2);\n\nconst systemPrompt = [\n  'You are an academic expert in AI governance, technology studies, and critical discourse analysis, specialising in: ' + item.domain + '.',\n  'Your task is to identify and code AI-specific discourse within the provided qualitative codes.',\n  '',\n  'DIMENSIONS OF AI DISCOURSE TO ANALYSE:',\n  '- technological: references to AI capabilities, systems, algorithms, automation, data, infrastructure',\n  '- ethical: AI ethics, bias, fairness, accountability, transparency, human rights, dignity',\n  '- societal: social impacts, labour displacement, inequality, power asymmetries, public trust',\n  '- geopolitical: AI race dynamics, national strategies, technological sovereignty, great power competition',\n  '- governance: regulation, policy, international frameworks, standards bodies, oversight mechanisms',\n  '- futures: AI futures discourse, utopian/dystopian narratives, risk, existential concerns, speculative framings',\n  '',\n  'RULES:',\n  '- Only code discourse that is genuinely AI-related — do not stretch interpretations.',\n  '- Each AI code must include an exact verbatim quotation from the original codes.',\n  '- Assign exactly one dimension per code.',\n  '- Provide clear reasoning for the dimension assigned.',\n  '- If no AI discourse is present, return an empty ai_specific_codes array.',\n  '',\n  'Return ONLY valid JSON matching this schema, with no additional commentary:',\n  '{',\n  '  \"document_name\": \"<filename>\",',\n  '  \"ai_specific_codes\": [',\n  '    {',\n  '      \"code\": \"<snake_case_ai_code_name>\",',\n  '      \"description\": \"<one sentence description of what AI discourse this captures>\",',\n  '      \"quotation\": \"<exact verbatim quote from the codes>\",',\n  '      \"dimension\": \"<technological|ethical|societal|geopolitical|governance|futures>\",',\n  '      \"reasoning\": \"<why this exemplifies AI discourse in the assigned dimension>\"',\n  '    }',\n  '  ],',\n  '  \"ai_discourse_summary\": \"<paragraph summarising the AI discourse patterns found in the document>\"',\n  '}'\n].join('\\n');\n\nconst userPrompt = [\n  'Document: ' + item.source_name,\n  'Research Question: ' + item.research_question,\n  'Domain: ' + item.domain,\n  'Total codes to analyse for AI discourse: ' + item.total_codes,\n  '',\n  'OPEN CODES FROM STEP 1:',\n  codesJson\n].join('\\n');\n\nreturn [{\n  json: {\n    claude_request: {\n      model: item.model,\n      max_tokens: 3000,\n      temperature: 0,\n      system: systemPrompt,\n      messages: [{\n        role: 'user',\n        content: userPrompt\n      }]\n    },\n    ai_coding_skipped: false,\n    clusters: item.clusters,\n    total_themes: item.total_themes,\n    overall_finding: item.overall_finding,\n    analytical_memo: item.analytical_memo,\n    all_codes: item.all_codes,\n    total_codes: item.total_codes,\n    source_name: item.source_name,\n    research_question: item.research_question,\n    analysis_method: item.analysis_method,\n    domain: item.domain,\n    model: item.model,\n    anthropic_api_key: item.anthropic_api_key,\n    enable_ai_coding: item.enable_ai_coding,\n    started_at: item.started_at,\n    step1_completed_at: item.step1_completed_at,\n    step2_completed_at: item.step2_completed_at,\n    total_tokens_step1: item.total_tokens_step1,\n    total_tokens_step2: item.total_tokens_step2,\n    step1_errors: item.step1_errors\n  }\n}];"
+      },
+      "id": "node-019",
+      "name": "Code: Build Step3 Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.claude_request }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-020",
+      "name": "HTTP: Step3 AI Discourse Coding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3920, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst meta = $('Code: Build Step3 Request').item.json;\n\nlet aiCodes = [];\nlet aiDiscourseSummary = '';\nlet step3TokensUsed = 0;\nconst errors = Array.isArray(meta.step1_errors) ? [...meta.step1_errors] : [];\n\nif (meta.ai_coding_skipped) {\n  aiDiscourseSummary = 'AI discourse coding was disabled (enable_ai_coding = false).';\n} else if (!apiResponse.content || !apiResponse.content[0] || !apiResponse.content[0].text) {\n  errors.push('Step 3 AI coding failed: No content in API response.');\n} else {\n  let rawText = apiResponse.content[0].text.trim();\n  rawText = rawText.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\n\n  let parsed;\n  try {\n    parsed = JSON.parse(rawText);\n  } catch (e) {\n    const match = rawText.match(/\\{[\\s\\S]*\\}/);\n    if (match) {\n      try {\n        parsed = JSON.parse(match[0]);\n      } catch (e2) {\n        errors.push('Step 3 JSON parse failed: ' + e2.message);\n        parsed = null;\n      }\n    } else {\n      errors.push('Step 3 no JSON found: ' + e.message);\n      parsed = null;\n    }\n  }\n\n  if (parsed) {\n    aiCodes = parsed.ai_specific_codes || [];\n    aiDiscourseSummary = parsed.ai_discourse_summary || '';\n    step3TokensUsed = ((apiResponse.usage || {}).input_tokens || 0) + ((apiResponse.usage || {}).output_tokens || 0);\n  }\n}\n\nconst totalTokens = (meta.total_tokens_step1 || 0) + (meta.total_tokens_step2 || 0) + step3TokensUsed;\n\nconst finalOutput = {\n  metadata: {\n    source_name: meta.source_name,\n    research_question: meta.research_question,\n    domain: meta.domain,\n    analysis_method: meta.analysis_method,\n    model_used: meta.model,\n    step1_completed_at: meta.step1_completed_at,\n    step2_completed_at: meta.step2_completed_at,\n    step3_completed_at: new Date().toISOString(),\n    total_codes: meta.total_codes,\n    total_themes: meta.total_themes,\n    total_ai_codes: aiCodes.length,\n    total_tokens_used: totalTokens\n  },\n  overall_finding: meta.overall_finding,\n  analytical_memo: meta.analytical_memo,\n  step2_clusters: meta.clusters,\n  step1_codes: meta.all_codes,\n  step3_ai_codes: aiCodes,\n  ai_discourse_summary: aiDiscourseSummary,\n  errors: errors\n};\n\nreturn [{ json: finalOutput }];"
+      },
+      "id": "node-021",
+      "name": "Code: Parse Step3 & Final Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4140, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "V2_Analysis",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_name": "={{ $json.metadata.source_name }}",
+            "research_question": "={{ $json.metadata.research_question }}",
+            "domain": "={{ $json.metadata.domain }}",
+            "analysis_method": "={{ $json.metadata.analysis_method }}",
+            "model_used": "={{ $json.metadata.model_used }}",
+            "total_codes": "={{ $json.metadata.total_codes }}",
+            "total_themes": "={{ $json.metadata.total_themes }}",
+            "total_ai_codes": "={{ $json.metadata.total_ai_codes }}",
+            "overall_finding": "={{ $json.overall_finding }}",
+            "analytical_memo": "={{ $json.analytical_memo }}",
+            "ai_discourse_summary": "={{ $json.ai_discourse_summary }}",
+            "clusters_json": "={{ JSON.stringify($json.step2_clusters) }}",
+            "ai_codes_json": "={{ JSON.stringify($json.step3_ai_codes) }}",
+            "raw_codes_json": "={{ JSON.stringify($json.step1_codes) }}",
+            "completed_at": "={{ $json.metadata.step3_completed_at }}",
+            "errors": "={{ JSON.stringify($json.errors) }}"
+          },
+          "schema": [
+            { "id": "source_name", "displayName": "source_name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "research_question", "displayName": "research_question", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "domain", "displayName": "domain", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "analysis_method", "displayName": "analysis_method", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "model_used", "displayName": "model_used", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "total_codes", "displayName": "total_codes", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": true },
+            { "id": "total_themes", "displayName": "total_themes", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": true },
+            { "id": "total_ai_codes", "displayName": "total_ai_codes", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": true },
+            { "id": "overall_finding", "displayName": "overall_finding", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "analytical_memo", "displayName": "analytical_memo", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "ai_discourse_summary", "displayName": "ai_discourse_summary", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "clusters_json", "displayName": "clusters_json", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "ai_codes_json", "displayName": "ai_codes_json", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "raw_codes_json", "displayName": "raw_codes_json", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "completed_at", "displayName": "completed_at", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "errors", "displayName": "errors", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-022",
+      "name": "Google Sheets: Save V2 Results",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [4360, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set: Research Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Research Config": {
+      "main": [
+        [
+          {
+            "node": "Google Drive: Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive: Download File": {
+      "main": [
+        [
+          {
+            "node": "IF: Is PDF?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Is PDF?": {
+      "main": [
+        [
+          {
+            "node": "Code: Prepare PDF Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Prepare PDF Extraction": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Extract PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Extract PDF Text": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse PDF Text": {
+      "main": [
+        [
+          {
+            "node": "Code: Clean & Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code: Add DOCX Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Add DOCX Metadata": {
+      "main": [
+        [
+          {
+            "node": "Code: Clean & Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Clean & Chunk Text": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Step1 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Step1 Request": {
+      "main": [
+        [
+          {
+            "node": "Wait: Rate Limit Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: Rate Limit Buffer": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Step1 Code Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Step1 Code Generation": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse Step1 Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse Step1 Codes": {
+      "main": [
+        [
+          {
+            "node": "Code: Collect All Step1 Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Collect All Step1 Codes": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Step2 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Step2 Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Step2 Code Clustering",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Step2 Code Clustering": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse Step2 Clusters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse Step2 Clusters": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Step3 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Step3 Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Step3 AI Discourse Coding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Step3 AI Discourse Coding": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse Step3 & Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse Step3 & Final Output": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Save V2 Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v2.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": ""
+  },
+  "tags": [
+    {
+      "createdAt": "2026-05-15T00:00:00.000Z",
+      "updatedAt": "2026-05-15T00:00:00.000Z",
+      "id": "tag-qualitative-analysis",
+      "name": "qualitative-analysis"
+    },
+    {
+      "createdAt": "2026-05-15T00:00:00.000Z",
+      "updatedAt": "2026-05-15T00:00:00.000Z",
+      "id": "tag-v2",
+      "name": "v2"
+    }
+  ]
+}

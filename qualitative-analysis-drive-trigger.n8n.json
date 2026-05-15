@@ -1,0 +1,478 @@
+{
+  "name": "Qualitative Thematic Analysis - Google Drive Auto",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "node-01-drive-trigger",
+      "name": "Google Drive Trigger",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [180, 300],
+      "notes": "Configure: set folderToWatch to your Google Drive folder ID. Files uploaded here will trigger automatic analysis."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-01",
+              "name": "anthropic_api_key",
+              "value": "YOUR_ANTHROPIC_API_KEY_HERE",
+              "type": "string"
+            },
+            {
+              "id": "cfg-02",
+              "name": "model",
+              "value": "claude-sonnet-4-6",
+              "type": "string"
+            },
+            {
+              "id": "cfg-03",
+              "name": "research_question",
+              "value": "What are the key themes in the data?",
+              "type": "string"
+            },
+            {
+              "id": "cfg-04",
+              "name": "analysis_method",
+              "value": "Braun & Clarke (2006) Thematic Analysis",
+              "type": "string"
+            },
+            {
+              "id": "cfg-05",
+              "name": "chunk_size_words",
+              "value": 800,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-02-api-config",
+      "name": "Set: API Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [400, 300],
+      "notes": "Set your Anthropic API key and default analysis parameters here. Change research_question and analysis_method to match your study."
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Google Drive Trigger').item.json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "node-03-drive-download",
+      "name": "Google Drive: Download File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [620, 300],
+      "notes": "Downloads the uploaded file as binary data for processing."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-pdf",
+              "leftValue": "={{ $('Google Drive Trigger').item.json.mimeType }}",
+              "rightValue": "application/pdf",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-04-if-pdf",
+      "name": "IF: Is PDF?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [840, 300],
+      "notes": "Routes PDF files to Claude extraction (output 0) and Word docs to n8n extraction (output 1)."
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst triggerData = $('Google Drive Trigger').item.json;\nconst apiConfig = $('Set: API Config').item.json;\n\nconst binaryProp = item.binary?.data;\nif (!binaryProp || !binaryProp.data) {\n  throw new Error('No binary PDF data received. Check the Google Drive Download node.');\n}\n\nif (apiConfig.anthropic_api_key.startsWith('YOUR_')) {\n  throw new Error('Set your Anthropic API key in the Set: API Config node.');\n}\n\nreturn [{\n  json: {\n    claude_request: {\n      model: apiConfig.model,\n      max_tokens: 4096,\n      temperature: 0,\n      messages: [{\n        role: 'user',\n        content: [\n          {\n            type: 'document',\n            source: {\n              type: 'base64',\n              media_type: 'application/pdf',\n              data: binaryProp.data\n            }\n          },\n          {\n            type: 'text',\n            text: 'Extract all text from this PDF document. Return only the raw text content, preserving paragraph breaks with blank lines. Do not summarize, analyze, or add commentary - return the exact text as written.'\n          }\n        ]\n      }]\n    },\n    filename: triggerData.name,\n    anthropic_api_key: apiConfig.anthropic_api_key,\n    research_question: apiConfig.research_question,\n    analysis_method: apiConfig.analysis_method,\n    chunk_size_words: apiConfig.chunk_size_words,\n    model: apiConfig.model\n  }\n}];"
+      },
+      "id": "node-05-prepare-pdf",
+      "name": "Code: Prepare PDF for Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.anthropic_api_key }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.claude_request }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-06-http-extract-pdf",
+      "name": "HTTP: Claude Extract PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1280, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst prepNode = $('Code: Prepare PDF for Claude').item.json;\n\nif (!apiResponse.content || !apiResponse.content[0] || !apiResponse.content[0].text) {\n  throw new Error('PDF extraction failed. API response: ' + JSON.stringify(apiResponse).substring(0, 300));\n}\n\nconst extractedText = apiResponse.content[0].text.trim();\n\nif (extractedText.length < 50) {\n  throw new Error('Very little text extracted (' + extractedText.length + ' chars). The PDF may be image-based or scanned. Consider OCR pre-processing.');\n}\n\nreturn [{\n  json: {\n    extracted_text: extractedText,\n    filename: prepNode.filename,\n    extraction_method: 'claude_pdf',\n    char_count: extractedText.length,\n    research_question: prepNode.research_question,\n    analysis_method: prepNode.analysis_method,\n    chunk_size_words: prepNode.chunk_size_words,\n    model: prepNode.model,\n    anthropic_api_key: prepNode.anthropic_api_key\n  }\n}];"
+      },
+      "id": "node-07-parse-pdf-text",
+      "name": "Code: Parse PDF Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 160]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "id": "node-08-extract-docx",
+      "name": "Extract from File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [1060, 440],
+      "notes": "Extracts text from Word (.docx) and plain text files."
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst triggerData = $('Google Drive Trigger').item.json;\nconst apiConfig = $('Set: API Config').item.json;\n\nconst rawText = item.text || item.data || '';\n\nif (!rawText || rawText.trim().length < 20) {\n  throw new Error('Insufficient text extracted from Word document. File may be empty or in an unsupported format.');\n}\n\nreturn [{\n  json: {\n    extracted_text: rawText.trim(),\n    filename: triggerData.name,\n    extraction_method: 'n8n_extract',\n    char_count: rawText.length,\n    research_question: apiConfig.research_question,\n    analysis_method: apiConfig.analysis_method,\n    chunk_size_words: apiConfig.chunk_size_words,\n    model: apiConfig.model,\n    anthropic_api_key: apiConfig.anthropic_api_key\n  }\n}];"
+      },
+      "id": "node-09-docx-metadata",
+      "name": "Code: Add DOCX Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1280, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nif (!data.extracted_text || data.extracted_text.trim().length === 0) {\n  throw new Error('No extracted text available. Check the PDF or DOCX extraction nodes.');\n}\nif (!data.anthropic_api_key || data.anthropic_api_key.startsWith('YOUR_')) {\n  throw new Error('Set your Anthropic API key in the Set: API Config node.');\n}\n\nconst text = data.extracted_text.trim();\nconst chunkSizeWords = parseInt(data.chunk_size_words) || 800;\nconst overlap = 50;\nconst words = text.split(/\\s+/).filter(w => w.length > 0);\n\nif (words.length === 0) {\n  throw new Error('Text contains no words after cleaning.');\n}\n\nconst chunks = [];\nfor (let i = 0; i < words.length; i += (chunkSizeWords - overlap)) {\n  const end = Math.min(i + chunkSizeWords, words.length);\n  chunks.push(words.slice(i, end).join(' '));\n  if (end >= words.length) break;\n}\n\nreturn chunks.map((chunk, idx) => ({\n  json: {\n    chunk_text: chunk,\n    chunk_index: idx,\n    total_chunks: chunks.length,\n    word_count: chunk.split(/\\s+/).length,\n    research_question: data.research_question,\n    analysis_method: data.analysis_method,\n    source_name: data.filename,\n    extraction_method: data.extraction_method,\n    model: data.model,\n    anthropic_api_key: data.anthropic_api_key,\n    started_at: new Date().toISOString()\n  }\n}));"
+      },
+      "id": "node-10-chunk",
+      "name": "Code: Validate & Chunk Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const chunk = $input.first().json;\n\nconst jsonSchema = '{\"codes\": [{\"code\": \"short_label\", \"description\": \"what it captures\", \"evidence\": \"exact verbatim quote\", \"memo\": \"optional note\"}]}';\n\nconst userContent = [\n  'You are a qualitative research expert performing thematic analysis.',\n  'Method: ' + chunk.analysis_method,\n  'Research Question: ' + chunk.research_question,\n  'Source: ' + chunk.source_name + ' | Chunk ' + (chunk.chunk_index + 1) + ' of ' + chunk.total_chunks + ' (' + chunk.word_count + ' words)',\n  '',\n  'TASK: Perform OPEN CODING on the text below.',\n  '',\n  'Rules:',\n  '- Identify meaningful units of meaning aligned with the research question',\n  '- Assign short descriptive codes (use_snake_case)',\n  '- Extract EXACT verbatim quotes as evidence — no paraphrasing, no fabrication',\n  '- Aim for 5-15 codes per chunk depending on density',\n  '- Avoid duplicate codes',\n  '',\n  'Return ONLY valid JSON (no markdown, no extra text):',\n  jsonSchema,\n  '',\n  'Text to analyze:',\n  chunk.chunk_text\n].join('\\n');\n\nreturn [{\n  json: {\n    claude_request: {\n      model: chunk.model,\n      max_tokens: 2048,\n      temperature: 0,\n      messages: [{ role: 'user', content: userContent }]\n    },\n    chunk_index: chunk.chunk_index,\n    total_chunks: chunk.total_chunks,\n    word_count: chunk.word_count,\n    source_name: chunk.source_name,\n    research_question: chunk.research_question,\n    analysis_method: chunk.analysis_method,\n    model: chunk.model,\n    anthropic_api_key: chunk.anthropic_api_key\n  }\n}];"
+      },
+      "id": "node-11-build-coding-req",
+      "name": "Code: Build Open Coding Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1940, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.anthropic_api_key }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.claude_request }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "node-12-http-coding",
+      "name": "HTTP: Open Coding (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst buildNode = $('Code: Build Open Coding Request').item.json;\n\nlet codes = [];\nconst parseErrors = [];\n\ntry {\n  if (!apiResponse.content || !apiResponse.content[0] || !apiResponse.content[0].text) {\n    throw new Error('Unexpected API response: ' + JSON.stringify(apiResponse).substring(0, 300));\n  }\n\n  let raw = apiResponse.content[0].text.trim();\n  raw = raw.replace(/^```json\\s*/i, '').replace(/\\s*```$/i, '').trim();\n  raw = raw.replace(/^```\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\n  const parsed = JSON.parse(raw);\n\n  if (!parsed.codes || !Array.isArray(parsed.codes)) {\n    throw new Error('Response missing codes array. Got: ' + raw.substring(0, 200));\n  }\n\n  codes = parsed.codes\n    .filter(c => c.code && c.evidence)\n    .map(c => ({\n      code: String(c.code).trim(),\n      description: String(c.description || '').trim(),\n      evidence: String(c.evidence).trim(),\n      memo: String(c.memo || '').trim(),\n      chunk_index: buildNode.chunk_index,\n      source_name: buildNode.source_name\n    }));\n\n} catch (e) {\n  parseErrors.push({\n    stage: 'open_coding',\n    chunk_index: buildNode.chunk_index,\n    error: e.message,\n    raw_response: apiResponse.content ? apiResponse.content[0].text.substring(0, 500) : 'no content'\n  });\n}\n\nreturn [{\n  json: {\n    codes: codes,\n    parse_errors: parseErrors,\n    chunk_index: buildNode.chunk_index,\n    total_chunks: buildNode.total_chunks,\n    tokens_used: apiResponse.usage ? (apiResponse.usage.input_tokens + apiResponse.usage.output_tokens) : 0,\n    research_question: buildNode.research_question,\n    analysis_method: buildNode.analysis_method,\n    source_name: buildNode.source_name,\n    model: buildNode.model,\n    anthropic_api_key: buildNode.anthropic_api_key\n  }\n}];"
+      },
+      "id": "node-13-parse-codes",
+      "name": "Code: Parse Open Codes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2380, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\nconst allCodes = [];\nconst allErrors = [];\nlet totalTokens = 0;\n\nfor (const item of allItems) {\n  allCodes.push(...(item.json.codes || []));\n  allErrors.push(...(item.json.parse_errors || []));\n  totalTokens += item.json.tokens_used || 0;\n}\n\nconst meta = allItems[0].json;\n\nreturn [{\n  json: {\n    all_codes: allCodes,\n    total_codes: allCodes.length,\n    parse_errors: allErrors,\n    total_tokens_used: totalTokens,\n    research_question: meta.research_question,\n    analysis_method: meta.analysis_method,\n    source_name: meta.source_name,\n    model: meta.model,\n    anthropic_api_key: meta.anthropic_api_key,\n    coding_completed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "node-14-collect-codes",
+      "name": "Code: Collect All Codes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2600, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst codesJson = JSON.stringify(data.all_codes, null, 2);\n\nconst jsonSchema = [\n  '{',\n  '  \"themes\": [',\n  '    {',\n  '      \"theme_name\": \"Clear Theme Name\",',\n  '      \"theme_description\": \"What this theme captures\",',\n  '      \"sub_themes\": [\"optional sub-theme\"],',\n  '      \"supporting_codes\": [\"code_1\", \"code_2\"],',\n  '      \"evidence_snippets\": [\"exact quote 1\", \"exact quote 2\"],',\n  '      \"frequency\": 5,',\n  '      \"analytical_memo\": \"interpretive note\"',\n  '    }',\n  '  ],',\n  '  \"overall_summary\": \"2-3 sentence synthesis answering the research question\",',\n  '  \"researcher_notes\": \"patterns, tensions, or gaps worth noting\"',\n  '}'\n].join('\\n');\n\nconst userContent = [\n  'You are a qualitative research expert performing thematic synthesis.',\n  'Method: ' + data.analysis_method,\n  'Research Question: ' + data.research_question,\n  'Source: ' + data.source_name,\n  'Total open codes to synthesize: ' + data.total_codes,\n  '',\n  'TASK: Group the open codes below into coherent THEMES.',\n  '',\n  'Rules:',\n  '- Identify 3-7 meaningful themes that address the research question',\n  '- Every theme must be grounded in the provided codes — do NOT fabricate',\n  '- Use only evidence quotes that appear in the codes provided',\n  '- overall_summary must directly answer the research question',\n  '',\n  'Return ONLY valid JSON (no markdown, no extra text):',\n  jsonSchema,\n  '',\n  'Open codes:',\n  codesJson\n].join('\\n');\n\nreturn [{\n  json: {\n    claude_request: {\n      model: data.model,\n      max_tokens: 4096,\n      temperature: 0,\n      messages: [{ role: 'user', content: userContent }]\n    },\n    source_name: data.source_name,\n    research_question: data.research_question,\n    analysis_method: data.analysis_method,\n    model: data.model,\n    anthropic_api_key: data.anthropic_api_key,\n    all_codes: data.all_codes,\n    total_codes: data.total_codes,\n    total_tokens_used: data.total_tokens_used,\n    parse_errors: data.parse_errors,\n    coding_completed_at: data.coding_completed_at\n  }\n}];"
+      },
+      "id": "node-15-build-synthesis",
+      "name": "Code: Build Synthesis Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2820, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.anthropic_api_key }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.claude_request }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-16-http-synthesis",
+      "name": "HTTP: Theme Synthesis (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3040, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst buildNode = $('Code: Build Synthesis Request').item.json;\n\nlet themes = [];\nlet summary = '';\nlet researcherNotes = '';\nconst errors = [...(buildNode.parse_errors || [])];\n\ntry {\n  if (!apiResponse.content || !apiResponse.content[0] || !apiResponse.content[0].text) {\n    throw new Error('Unexpected synthesis response: ' + JSON.stringify(apiResponse).substring(0, 300));\n  }\n\n  let raw = apiResponse.content[0].text.trim();\n  raw = raw.replace(/^```json\\s*/i, '').replace(/\\s*```$/i, '').trim();\n  raw = raw.replace(/^```\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\n  const parsed = JSON.parse(raw);\n\n  if (!parsed.themes || !Array.isArray(parsed.themes)) {\n    throw new Error('Response missing themes array. Got: ' + raw.substring(0, 200));\n  }\n\n  themes = parsed.themes.map(t => ({\n    theme_name: t.theme_name || 'Unnamed Theme',\n    theme_description: t.theme_description || '',\n    sub_themes: Array.isArray(t.sub_themes) ? t.sub_themes : [],\n    supporting_codes: Array.isArray(t.supporting_codes) ? t.supporting_codes : [],\n    evidence_snippets: Array.isArray(t.evidence_snippets) ? t.evidence_snippets : [],\n    frequency: typeof t.frequency === 'number' ? t.frequency : (t.supporting_codes ? t.supporting_codes.length : 0),\n    analytical_memo: t.analytical_memo || ''\n  }));\n\n  summary = parsed.overall_summary || '';\n  researcherNotes = parsed.researcher_notes || '';\n\n} catch (e) {\n  errors.push({ stage: 'theme_synthesis', error: e.message });\n}\n\nconst synthesisTokens = apiResponse.usage\n  ? (apiResponse.usage.input_tokens + apiResponse.usage.output_tokens)\n  : 0;\n\nreturn [{\n  json: {\n    metadata: {\n      source_name: buildNode.source_name,\n      research_question: buildNode.research_question,\n      analysis_method: buildNode.analysis_method,\n      model_used: buildNode.model,\n      coding_completed_at: buildNode.coding_completed_at,\n      synthesis_completed_at: new Date().toISOString(),\n      total_codes_analyzed: buildNode.total_codes,\n      total_themes_identified: themes.length,\n      total_tokens_used: (buildNode.total_tokens_used || 0) + synthesisTokens\n    },\n    summary: summary,\n    researcher_notes: researcherNotes,\n    themes: themes,\n    raw_codes: buildNode.all_codes,\n    errors: errors\n  }\n}];"
+      },
+      "id": "node-17-parse-themes",
+      "name": "Code: Parse Themes & Final Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3260, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Themes",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_name": "={{ $json.metadata.source_name }}",
+            "research_question": "={{ $json.metadata.research_question }}",
+            "analysis_method": "={{ $json.metadata.analysis_method }}",
+            "model_used": "={{ $json.metadata.model_used }}",
+            "total_codes": "={{ $json.metadata.total_codes_analyzed }}",
+            "total_themes": "={{ $json.metadata.total_themes_identified }}",
+            "summary": "={{ $json.summary }}",
+            "themes_json": "={{ JSON.stringify($json.themes) }}",
+            "completed_at": "={{ $json.metadata.synthesis_completed_at }}",
+            "errors": "={{ $json.errors.length > 0 ? JSON.stringify($json.errors) : '' }}"
+          },
+          "schema": [
+            {"id": "source_name", "displayName": "source_name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "research_question", "displayName": "research_question", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "analysis_method", "displayName": "analysis_method", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "model_used", "displayName": "model_used", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "total_codes", "displayName": "total_codes", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": true},
+            {"id": "total_themes", "displayName": "total_themes", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "summary", "displayName": "summary", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "themes_json", "displayName": "themes_json", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "completed_at", "displayName": "completed_at", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true},
+            {"id": "errors", "displayName": "errors", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true}
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-18-google-sheets",
+      "name": "Google Sheets: Save Results",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [3480, 300]
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [{"node": "Set: API Config", "type": "main", "index": 0}]
+      ]
+    },
+    "Set: API Config": {
+      "main": [
+        [{"node": "Google Drive: Download File", "type": "main", "index": 0}]
+      ]
+    },
+    "Google Drive: Download File": {
+      "main": [
+        [{"node": "IF: Is PDF?", "type": "main", "index": 0}]
+      ]
+    },
+    "IF: Is PDF?": {
+      "main": [
+        [{"node": "Code: Prepare PDF for Claude", "type": "main", "index": 0}],
+        [{"node": "Extract from File", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Prepare PDF for Claude": {
+      "main": [
+        [{"node": "HTTP: Claude Extract PDF", "type": "main", "index": 0}]
+      ]
+    },
+    "HTTP: Claude Extract PDF": {
+      "main": [
+        [{"node": "Code: Parse PDF Text", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Parse PDF Text": {
+      "main": [
+        [{"node": "Code: Validate & Chunk Text", "type": "main", "index": 0}]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [{"node": "Code: Add DOCX Metadata", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Add DOCX Metadata": {
+      "main": [
+        [{"node": "Code: Validate & Chunk Text", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Validate & Chunk Text": {
+      "main": [
+        [{"node": "Code: Build Open Coding Request", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Build Open Coding Request": {
+      "main": [
+        [{"node": "HTTP: Open Coding (Claude)", "type": "main", "index": 0}]
+      ]
+    },
+    "HTTP: Open Coding (Claude)": {
+      "main": [
+        [{"node": "Code: Parse Open Codes", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Parse Open Codes": {
+      "main": [
+        [{"node": "Code: Collect All Codes", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Collect All Codes": {
+      "main": [
+        [{"node": "Code: Build Synthesis Request", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Build Synthesis Request": {
+      "main": [
+        [{"node": "HTTP: Theme Synthesis (Claude)", "type": "main", "index": 0}]
+      ]
+    },
+    "HTTP: Theme Synthesis (Claude)": {
+      "main": [
+        [{"node": "Code: Parse Themes & Final Output", "type": "main", "index": 0}]
+      ]
+    },
+    "Code: Parse Themes & Final Output": {
+      "main": [
+        [{"node": "Google Sheets: Save Results", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "qualitative-drive-trigger-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "qualitative-drive-trigger"
+  },
+  "pinData": {},
+  "staticData": null,
+  "tags": [
+    {"id": "tag-qualitative", "name": "qualitative-research"},
+    {"id": "tag-drive", "name": "google-drive-auto"}
+  ]
+}
